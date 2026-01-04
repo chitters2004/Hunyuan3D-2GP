@@ -569,16 +569,19 @@ def build_app():
                 with gr.Tabs(selected='tab_options' if TURBO_MODE else 'tab_export'):
                     with gr.Tab("Options", id='tab_options', visible=TURBO_MODE):
                         gen_mode = gr.Radio(label='Generation Mode',
-                                            info='Recommendation: Turbo for most cases, Fast for very complex cases, Standard seldom use.',
+                                            info='Turbo = fastest (5 steps), good for most models. Fast = medium speed, better for complex shapes with fine details. Standard = slowest but highest quality, rarely needed.',
                                             choices=['Turbo', 'Fast', 'Standard'], value='Turbo')
-                        decode_mode = gr.Radio(label='Decoding Mode',
-                                               info='The resolution for exporting mesh from generated vectset',
+                        decode_mode = gr.Radio(label='Output Detail Level',
+                                               info='How detailed the final 3D mesh will be. Low = fewer polygons, faster. Standard = balanced (recommended). High = most detail but larger file size.',
                                                choices=['Low', 'Standard', 'High'],
                                                value='Standard')
                     with gr.Tab('Advanced Options', id='tab_advanced_options'):
+                        gr.Markdown("**Basic Settings** - Start here for the most important options")
                         with gr.Row():
-                            check_box_rembg = gr.Checkbox(value=True, label='Remove Background', min_width=100)
-                            randomize_seed = gr.Checkbox(label="Randomize seed", value=True, min_width=100)
+                            check_box_rembg = gr.Checkbox(value=True, label='Remove Background', min_width=100,
+                                                         info='Automatically removes the background from your input image. Turn OFF if your image already has a transparent background.')
+                            randomize_seed = gr.Checkbox(label="Randomize seed", value=True, min_width=100,
+                                                        info='Creates a unique 3D model each time. Turn OFF to reproduce the exact same result.')
                         seed = gr.Slider(
                             label="Seed",
                             minimum=0,
@@ -586,117 +589,123 @@ def build_app():
                             step=1,
                             value=1234,
                             min_width=100,
+                            info='A number that controls randomness. Same seed + same settings = same 3D model. Useful for reproducing good results.'
                         )
+                        gr.Markdown("**Quality vs Speed** - Higher values = better quality but slower")
                         with gr.Row():
                             num_steps = gr.Slider(maximum=100,
                                                   minimum=1,
                                                   value=5 if 'turbo' in args.subfolder else 30,
-                                                  step=1, label='Inference Steps')
-                            octree_resolution = gr.Slider(maximum=512, minimum=16, value=256, label='Octree Resolution')
+                                                  step=1, label='Inference Steps',
+                                                  info='How many times the AI refines the 3D model. More steps = better quality but slower. Turbo mode: 5 is good. Normal mode: 20-50.')
+                            octree_resolution = gr.Slider(maximum=512, minimum=16, value=256, label='Octree Resolution',
+                                                         info='Controls the detail level of the 3D mesh. Higher = more polygons and finer details. 256 is balanced, 384-512 for maximum detail.')
                         with gr.Row():
-                            cfg_scale = gr.Number(value=5.0, label='Guidance Scale', min_width=100)
+                            cfg_scale = gr.Number(value=5.0, label='Guidance Scale', min_width=100,
+                                                 info='How closely the AI follows your input image. Higher = more faithful to input but may look stiff. Lower = more creative but may drift from input. 5-7 is usually best.')
                             num_chunks = gr.Slider(maximum=5000000, minimum=1000, value=8000,
-                                                   label='Number of Chunks', min_width=100)
+                                                   label='Number of Chunks', min_width=100,
+                                                   info='Memory optimization setting. Higher values use more VRAM but process faster. Lower if you get out-of-memory errors.')
                     with gr.Tab('Shape Options', id='tab_shape_options'):
-                        gr.Markdown("**Surface Extraction**")
+                        gr.Markdown("**Surface Extraction** - Controls how the 3D surface is created from the AI's output")
                         with gr.Row():
                             mc_level = gr.Slider(minimum=-0.1, maximum=0.1, value=0.0, step=0.01,
                                                 label='MC Level',
-                                                info='Marching cubes threshold. Negative=larger mesh, Positive=tighter mesh')
+                                                info='Adjusts the "thickness" of surfaces. Negative values make the model slightly larger/puffier. Positive values make it tighter/thinner. Try small changes like 0.02.')
                             bounds = gr.Slider(minimum=0.9, maximum=1.5, value=1.01, step=0.01,
                                               label='Bounds',
-                                              info='Bounding box scale. Larger=more room, smaller=denser detail')
-                        gr.Markdown("**Stochastic Sampling** - Add controlled randomness to generation")
+                                              info='Size of the 3D workspace. Larger values give the model more room to spread out. Smaller values pack more detail into a tighter space. Usually leave at 1.01.')
+                        gr.Markdown("**Randomness Control** - Add variety to your generations (advanced)")
                         with gr.Row():
                             eta = gr.Slider(minimum=0.0, maximum=1.0, value=0.0, step=0.1,
-                                           label='Eta',
-                                           info='0=deterministic (reproducible), higher=more random variation')
+                                           label='Eta (Randomness)',
+                                           info='At 0, the same seed always gives the exact same result. Increase to add creative variation - but results become less predictable. Start with 0.')
                             min_resolution = gr.Slider(minimum=31, maximum=127, value=63, step=2,
                                                       label='Min Resolution',
-                                                      info='Hierarchical decoding minimum. Higher=more detail, slower')
+                                                      info='Starting detail level for building the 3D model. Higher values capture finer details but take longer. 63 is a good balance.')
                         with gr.Row():
                             s_churn = gr.Slider(minimum=0.0, maximum=1.0, value=0.0, step=0.1,
                                                label='S Churn',
-                                               info='Noise re-injection rate. Higher=more variety, may reduce quality')
+                                               info='Adds "creative noise" during generation. Can help with variety but too high may create artifacts. Keep at 0 for consistent results.')
                             s_noise = gr.Slider(minimum=0.5, maximum=2.0, value=1.0, step=0.1,
                                                label='S Noise',
-                                               info='Noise magnitude when s_churn>0. Higher=more variation')
+                                               info='Strength of the creative noise (only matters if S Churn > 0). Higher = more variation. 1.0 is default.')
                         with gr.Row():
                             s_tmin = gr.Slider(minimum=0.0, maximum=1.0, value=0.0, step=0.1,
                                               label='S Tmin',
-                                              info='Min timestep for noise. Higher=noise only in early steps')
+                                              info='When to START adding noise during generation. Higher = noise only affects early stages. Usually leave at 0.')
                             s_tmax = gr.Slider(minimum=1.0, maximum=100.0, value=100.0, step=1.0,
                                               label='S Tmax',
-                                              info='Max timestep for noise. Lower=noise only in later steps')
-                        gr.Markdown("**FlashVDM Options** (Turbo mode only)")
+                                              info='When to STOP adding noise during generation. Lower = noise only affects later stages. Usually leave at 100.')
+                        gr.Markdown("**Turbo Mode Options** - Only used when running with --turbo flag")
                         with gr.Row():
                             adaptive_kv = gr.Checkbox(value=True, label='Adaptive KV Selection',
-                                                     info='Smart caching that adapts to complexity')
+                                                     info='Smart memory optimization that adjusts to your model complexity. Leave ON for best results. Only turn OFF if you experience issues.')
                             topk_mode = gr.Dropdown(choices=['mean', 'merge'], value='mean', label='TopK Mode',
-                                                   info='mean=smoother, merge=sharper but noisier')
+                                                   info='"mean" gives smoother, cleaner surfaces. "merge" can be sharper but may have more noise. Try "mean" first.')
                             mini_grid_num = gr.Slider(minimum=2, maximum=8, value=4, step=1,
                                                      label='Mini Grid Num',
-                                                     info='Parallel processing subdivisions. Higher=faster but more VRAM')
+                                                     info='How many pieces to split processing into. Higher = faster but uses more VRAM. Lower if you get memory errors.')
                     with gr.Tab('Texture Options', id='tab_texture_options', visible=HAS_TEXTUREGEN):
-                        gr.Markdown("**Resolution Settings**")
+                        gr.Markdown("**Resolution Settings** - Higher = sharper textures but slower and more VRAM")
                         with gr.Row():
                             texture_size = gr.Dropdown(choices=[512, 1024, 2048, 4096], value=2048,
                                                       label='Texture Size',
-                                                      info='Output texture resolution. 2048=balanced, 4096=max quality but slower')
+                                                      info='Resolution of the final texture image in pixels. 1024=fast/low quality, 2048=balanced (recommended), 4096=best quality but slow and needs lots of VRAM.')
                             render_size = gr.Dropdown(choices=[512, 1024, 2048], value=2048,
                                                      label='Render Size',
-                                                     info='Internal multiview render resolution. Match texture size for best results')
-                        gr.Markdown("**Texture Baking** - How multiview images are combined onto the mesh")
+                                                     info='Resolution used when generating texture views. Should match or be close to Texture Size. Lower values speed up generation.')
+                        gr.Markdown("**Texture Blending** - Controls how colors from different viewing angles are combined")
                         with gr.Row():
                             bake_exp = gr.Slider(minimum=1, maximum=8, value=4, step=1,
-                                                label='Bake Exponent',
-                                                info='Blending weight. Higher=sharper but may show seams, Lower=smoother')
+                                                label='Bake Sharpness',
+                                                info='How sharply to blend texture views. Higher = sharper details but may show visible seams between views. Lower = smoother blending but softer details. 4 is balanced.')
                             bake_angle_thres = gr.Slider(minimum=30, maximum=85, value=75, step=5,
-                                                        label='Bake Angle Threshold',
-                                                        info='Max view angle (degrees). Lower=sharper, Higher=better coverage')
-                        gr.Markdown("**Multiview Diffusion** - Generates views of your model from multiple angles")
+                                                        label='View Angle Limit',
+                                                        info='Maximum angle (in degrees) for using a texture view. Lower = only uses straight-on views (sharper but may miss areas). Higher = uses angled views too (better coverage). 70-80 is good.')
+                        gr.Markdown("**View Generation** - Creates images of your model from multiple angles to build the texture")
                         with gr.Row():
                             multiview_steps = gr.Slider(minimum=10, maximum=50, value=30, step=5,
-                                                       label='Multiview Steps',
-                                                       info='Denoising steps. More=higher quality views, slower. 30 is good default')
-                        gr.Markdown("**Light Removal (Delight)** - Removes baked-in lighting/shadows from input image")
+                                                       label='Multiview Quality Steps',
+                                                       info='How many refinement steps for each texture view. More = higher quality textures but slower. 20-30 is usually enough, 40+ for best quality.')
+                        gr.Markdown("**Shadow Removal** - Removes lighting/shadows baked into your input image for cleaner textures")
                         with gr.Row():
                             delight_steps = gr.Slider(minimum=20, maximum=80, value=50, step=5,
-                                                     label='Delight Steps',
-                                                     info='Denoising steps for shadow removal. More=cleaner but slower')
+                                                     label='Shadow Removal Steps',
+                                                     info='How thoroughly to remove shadows from your input. More steps = cleaner removal but slower. 40-60 is usually good.')
                         with gr.Row():
                             delight_cfg_image = gr.Slider(minimum=0.5, maximum=3.0, value=1.5, step=0.1,
-                                                         label='Delight CFG (Image)',
-                                                         info='Image guidance. Higher=preserve structure, may keep shadows')
+                                                         label='Structure Preservation',
+                                                         info='How much to keep the original image details. Higher = preserves more detail but may keep some shadows. Lower = more aggressive shadow removal but may lose details.')
                             delight_cfg_text = gr.Slider(minimum=0.5, maximum=3.0, value=1.0, step=0.1,
-                                                        label='Delight CFG (Text)',
-                                                        info='Text guidance. Higher=stronger light removal instruction')
+                                                        label='Shadow Removal Strength',
+                                                        info='How strongly to apply shadow removal. Increase if shadows remain visible. Decrease if the result looks too flat or washed out.')
                         with gr.Row():
-                            use_antialias = gr.Checkbox(value=True, label='Antialiasing',
-                                                       info='Smooth jagged edges. Recommended ON for quality')
+                            use_antialias = gr.Checkbox(value=True, label='Smooth Edges (Antialiasing)',
+                                                       info='Smooths jagged/pixelated edges in the texture. Leave ON for better quality. Only turn OFF for slightly faster processing.')
                     with gr.Tab('Mesh Options', id='tab_mesh_options'):
-                        gr.Markdown("**Floater Removal** - Remove disconnected mesh fragments (noise)")
+                        gr.Markdown("**Cleanup** - Removes floating bits and debris from your 3D model")
                         floater_ratio = gr.Slider(minimum=0.001, maximum=0.05, value=0.005, step=0.001,
-                                                 label='Floater Ratio',
-                                                 info='Remove components smaller than this fraction of total faces. Higher=more aggressive')
-                        gr.Markdown("**Face Reduction Settings** - Control mesh simplification quality")
+                                                 label='Floater Cleanup Threshold',
+                                                 info='Removes small disconnected pieces (like floating dots or fragments). Higher values remove more aggressively - be careful not to remove intentional small parts like buttons or eyes.')
+                        gr.Markdown("**Mesh Simplification** - Reduces polygon count while keeping the shape looking good")
                         with gr.Row():
                             quality_thr = gr.Slider(minimum=0.1, maximum=1.0, value=1.0, step=0.1,
-                                                   label='Quality Threshold',
-                                                   info='Higher=preserve quality, may not reach target. Lower=aggressive reduction')
-                            preserve_boundary = gr.Checkbox(value=True, label='Preserve Boundary',
-                                                           info='Keep mesh edges/silhouette intact')
+                                                   label='Quality Priority',
+                                                   info='Balance between quality and polygon reduction. 1.0 = prioritize quality (may keep more polygons). Lower = more aggressive reduction (smaller file but may look blockier).')
+                            preserve_boundary = gr.Checkbox(value=True, label='Protect Edges',
+                                                           info='Keeps the outline/silhouette of your model sharp. Turn OFF only if you need maximum polygon reduction and don\'t mind softer edges.')
                         with gr.Row():
                             boundary_weight = gr.Slider(minimum=1, maximum=10, value=3, step=1,
-                                                       label='Boundary Weight',
-                                                       info='How strongly to protect boundaries. Higher=more protection')
-                            preserve_normal = gr.Checkbox(value=True, label='Preserve Normals',
-                                                         info='Keep shading directions consistent')
+                                                       label='Edge Protection Strength',
+                                                       info='How strongly to protect edges when simplifying (only works if Protect Edges is ON). Higher = edges are more protected. 3 is a good balance.')
+                            preserve_normal = gr.Checkbox(value=True, label='Keep Smooth Shading',
+                                                         info='Maintains the smooth appearance of curved surfaces. Turn OFF for more aggressive reduction, but the model may look more faceted/angular.')
                         with gr.Row():
-                            preserve_topology = gr.Checkbox(value=True, label='Preserve Topology',
-                                                           info='Prevent holes/merging. Keep ON for 3D printing')
-                            auto_clean = gr.Checkbox(value=True, label='Auto Clean',
-                                                    info='Remove degenerate faces and duplicate vertices')
+                            preserve_topology = gr.Checkbox(value=True, label='Prevent Holes',
+                                                           info='Prevents the simplification from creating holes or merging separate parts. IMPORTANT: Keep ON if you plan to 3D print! Turn OFF only for maximum reduction.')
+                            auto_clean = gr.Checkbox(value=True, label='Auto-Fix Errors',
+                                                    info='Automatically fixes common mesh problems like duplicate points and malformed triangles. Leave ON unless you have a specific reason to disable it.')
                     with gr.Tab('Model Config', id='tab_model_config'):
                         gr.Markdown(f"""
 ## Current Model Configuration
@@ -751,14 +760,19 @@ python gradio_app.py --mv --profile 3
 ```
                         """)
                     with gr.Tab("Export", id='tab_export'):
+                        gr.Markdown("**Export Settings** - Configure how to save your 3D model")
                         with gr.Row():
                             file_type = gr.Dropdown(label='File Type', choices=SUPPORTED_FORMATS,
-                                                    value='glb', min_width=100)
-                            reduce_face = gr.Checkbox(label='Simplify Mesh', value=False, min_width=100)
+                                                    value='glb', min_width=100,
+                                                    info='GLB = best for web/games (includes textures). OBJ = widely compatible. FBX = good for animation software. STL = for 3D printing.')
+                            reduce_face = gr.Checkbox(label='Simplify Mesh', value=False, min_width=100,
+                                                     info='Reduces polygon count to make a smaller file. Useful for web/games or if the model is too detailed.')
                             export_texture = gr.Checkbox(label='Include Texture', value=False,
-                                                         visible=False, min_width=100)
+                                                         visible=False, min_width=100,
+                                                         info='Include the color texture in the export. Only available for textured models.')
                         target_face_num = gr.Slider(maximum=1000000, minimum=100, value=10000,
-                                                    label='Target Face Number')
+                                                    label='Target Polygon Count',
+                                                    info='Number of triangles in the simplified mesh. Lower = smaller file/faster loading. 10,000 is good for web. 50,000+ for high-quality renders.')
                         with gr.Row():
                             confirm_export = gr.Button(value="Transform", min_width=100)
                             file_export = gr.DownloadButton(label="Download", variant='primary',
