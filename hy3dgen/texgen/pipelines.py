@@ -43,7 +43,11 @@ class Hunyuan3DTexGenConfig:
         self.render_size = 2048
         self.texture_size = 2048
         self.bake_exp = 4
+        self.bake_angle_thres = 75  # Max angle for surface visibility
         self.merge_method = 'fast'
+
+        # Note: multiview_steps, delight_steps, delight_cfg_image, delight_cfg_text
+        # are set in utils/multiview_utils.py and utils/dehighlight_utils.py respectively
 
 
 class Hunyuan3DPaintPipeline:

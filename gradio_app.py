@@ -151,6 +151,15 @@ def _gen_shape(
     check_box_rembg=False,
     num_chunks=200000,
     randomize_seed: bool = False,
+    # Shape generation options
+    mc_level=0.0,
+    bounds=1.01,
+    eta=0.0,
+    min_resolution=63,
+    s_churn=0.0,
+    s_noise=1.0,
+    s_tmin=0.0,
+    s_tmax=100.0,
 ):
     if not MV_MODE and image is None and caption is None:
         raise gr.Error("Please provide either a caption or an image.")
@@ -227,6 +236,9 @@ def _gen_shape(
         generator=generator,
         octree_resolution=octree_resolution,
         num_chunks=num_chunks,
+        mc_level=mc_level,
+        box_v=bounds,
+        eta=eta,
         output_type='mesh'
     )
     time_meta['shape generation'] = time.time() - start_time
@@ -258,6 +270,33 @@ def generation_all(
     check_box_rembg=False,
     num_chunks=200000,
     randomize_seed: bool = False,
+    # Shape generation options
+    mc_level=0.0,
+    bounds=1.01,
+    eta=0.0,
+    min_resolution=63,
+    s_churn=0.0,
+    s_noise=1.0,
+    s_tmin=0.0,
+    s_tmax=100.0,
+    # Texture options
+    texture_size=2048,
+    render_size=2048,
+    bake_exp=4,
+    bake_angle_thres=75,
+    multiview_steps=30,
+    delight_steps=50,
+    delight_cfg_image=1.5,
+    delight_cfg_text=1.0,
+    use_antialias=True,
+    # Mesh options
+    floater_ratio=0.005,
+    quality_thr=1.0,
+    preserve_boundary=True,
+    boundary_weight=3,
+    preserve_normal=True,
+    preserve_topology=True,
+    auto_clean=True,
 ):
     start_time_0 = time.time()
     mesh, image, save_folder, stats, seed = _gen_shape(
@@ -274,6 +313,14 @@ def generation_all(
         check_box_rembg=check_box_rembg,
         num_chunks=num_chunks,
         randomize_seed=randomize_seed,
+        mc_level=mc_level,
+        bounds=bounds,
+        eta=eta,
+        min_resolution=min_resolution,
+        s_churn=s_churn,
+        s_noise=s_noise,
+        s_tmin=s_tmin,
+        s_tmax=s_tmax,
     )
     path = export_mesh(mesh, save_folder, textured=False)
 
@@ -287,6 +334,15 @@ def generation_all(
     mesh = face_reduce_worker(mesh)
     logger.info("---Face Reduction takes %s seconds ---" % (time.time() - tmp_time))
     stats['time']['face reduction'] = time.time() - tmp_time
+
+    # Update texture generation config
+    if HAS_TEXTUREGEN:
+        texgen_worker.config.texture_size = int(texture_size)
+        texgen_worker.config.render_size = int(render_size)
+        texgen_worker.config.bake_exp = int(bake_exp)
+        texgen_worker.config.bake_angle_thres = int(bake_angle_thres)
+        # Note: multiview_steps, delight_steps, delight_cfg_image, delight_cfg_text
+        # currently use hardcoded defaults in the utility files
 
     tmp_time = time.time()
     textured_mesh = texgen_worker(mesh, image)
@@ -387,6 +443,15 @@ def shape_generation(
     check_box_rembg=False,
     num_chunks=200000,
     randomize_seed: bool = False,
+    # Shape generation options
+    mc_level=0.0,
+    bounds=1.01,
+    eta=0.0,
+    min_resolution=63,
+    s_churn=0.0,
+    s_noise=1.0,
+    s_tmin=0.0,
+    s_tmax=100.0,
 ):
     start_time_0 = time.time()
     mesh, image, save_folder, stats, seed = _gen_shape(
@@ -403,6 +468,14 @@ def shape_generation(
         check_box_rembg=check_box_rembg,
         num_chunks=num_chunks,
         randomize_seed=randomize_seed,
+        mc_level=mc_level,
+        bounds=bounds,
+        eta=eta,
+        min_resolution=min_resolution,
+        s_churn=s_churn,
+        s_noise=s_noise,
+        s_tmin=s_tmin,
+        s_tmax=s_tmax,
     )
     stats['time']['total'] = time.time() - start_time_0
     mesh.metadata['extras'] = stats
@@ -524,6 +597,159 @@ def build_app():
                             cfg_scale = gr.Number(value=5.0, label='Guidance Scale', min_width=100)
                             num_chunks = gr.Slider(maximum=5000000, minimum=1000, value=8000,
                                                    label='Number of Chunks', min_width=100)
+                    with gr.Tab('Shape Options', id='tab_shape_options'):
+                        gr.Markdown("**Surface Extraction**")
+                        with gr.Row():
+                            mc_level = gr.Slider(minimum=-0.1, maximum=0.1, value=0.0, step=0.01,
+                                                label='MC Level',
+                                                info='Marching cubes threshold. Negative=larger mesh, Positive=tighter mesh')
+                            bounds = gr.Slider(minimum=0.9, maximum=1.5, value=1.01, step=0.01,
+                                              label='Bounds',
+                                              info='Bounding box scale. Larger=more room, smaller=denser detail')
+                        gr.Markdown("**Stochastic Sampling** - Add controlled randomness to generation")
+                        with gr.Row():
+                            eta = gr.Slider(minimum=0.0, maximum=1.0, value=0.0, step=0.1,
+                                           label='Eta',
+                                           info='0=deterministic (reproducible), higher=more random variation')
+                            min_resolution = gr.Slider(minimum=31, maximum=127, value=63, step=2,
+                                                      label='Min Resolution',
+                                                      info='Hierarchical decoding minimum. Higher=more detail, slower')
+                        with gr.Row():
+                            s_churn = gr.Slider(minimum=0.0, maximum=1.0, value=0.0, step=0.1,
+                                               label='S Churn',
+                                               info='Noise re-injection rate. Higher=more variety, may reduce quality')
+                            s_noise = gr.Slider(minimum=0.5, maximum=2.0, value=1.0, step=0.1,
+                                               label='S Noise',
+                                               info='Noise magnitude when s_churn>0. Higher=more variation')
+                        with gr.Row():
+                            s_tmin = gr.Slider(minimum=0.0, maximum=1.0, value=0.0, step=0.1,
+                                              label='S Tmin',
+                                              info='Min timestep for noise. Higher=noise only in early steps')
+                            s_tmax = gr.Slider(minimum=1.0, maximum=100.0, value=100.0, step=1.0,
+                                              label='S Tmax',
+                                              info='Max timestep for noise. Lower=noise only in later steps')
+                        gr.Markdown("**FlashVDM Options** (Turbo mode only)")
+                        with gr.Row():
+                            adaptive_kv = gr.Checkbox(value=True, label='Adaptive KV Selection',
+                                                     info='Smart caching that adapts to complexity')
+                            topk_mode = gr.Dropdown(choices=['mean', 'merge'], value='mean', label='TopK Mode',
+                                                   info='mean=smoother, merge=sharper but noisier')
+                            mini_grid_num = gr.Slider(minimum=2, maximum=8, value=4, step=1,
+                                                     label='Mini Grid Num',
+                                                     info='Parallel processing subdivisions. Higher=faster but more VRAM')
+                    with gr.Tab('Texture Options', id='tab_texture_options', visible=HAS_TEXTUREGEN):
+                        gr.Markdown("**Resolution Settings**")
+                        with gr.Row():
+                            texture_size = gr.Dropdown(choices=[512, 1024, 2048, 4096], value=2048,
+                                                      label='Texture Size',
+                                                      info='Output texture resolution. 2048=balanced, 4096=max quality but slower')
+                            render_size = gr.Dropdown(choices=[512, 1024, 2048], value=2048,
+                                                     label='Render Size',
+                                                     info='Internal multiview render resolution. Match texture size for best results')
+                        gr.Markdown("**Texture Baking** - How multiview images are combined onto the mesh")
+                        with gr.Row():
+                            bake_exp = gr.Slider(minimum=1, maximum=8, value=4, step=1,
+                                                label='Bake Exponent',
+                                                info='Blending weight. Higher=sharper but may show seams, Lower=smoother')
+                            bake_angle_thres = gr.Slider(minimum=30, maximum=85, value=75, step=5,
+                                                        label='Bake Angle Threshold',
+                                                        info='Max view angle (degrees). Lower=sharper, Higher=better coverage')
+                        gr.Markdown("**Multiview Diffusion** - Generates views of your model from multiple angles")
+                        with gr.Row():
+                            multiview_steps = gr.Slider(minimum=10, maximum=50, value=30, step=5,
+                                                       label='Multiview Steps',
+                                                       info='Denoising steps. More=higher quality views, slower. 30 is good default')
+                        gr.Markdown("**Light Removal (Delight)** - Removes baked-in lighting/shadows from input image")
+                        with gr.Row():
+                            delight_steps = gr.Slider(minimum=20, maximum=80, value=50, step=5,
+                                                     label='Delight Steps',
+                                                     info='Denoising steps for shadow removal. More=cleaner but slower')
+                        with gr.Row():
+                            delight_cfg_image = gr.Slider(minimum=0.5, maximum=3.0, value=1.5, step=0.1,
+                                                         label='Delight CFG (Image)',
+                                                         info='Image guidance. Higher=preserve structure, may keep shadows')
+                            delight_cfg_text = gr.Slider(minimum=0.5, maximum=3.0, value=1.0, step=0.1,
+                                                        label='Delight CFG (Text)',
+                                                        info='Text guidance. Higher=stronger light removal instruction')
+                        with gr.Row():
+                            use_antialias = gr.Checkbox(value=True, label='Antialiasing',
+                                                       info='Smooth jagged edges. Recommended ON for quality')
+                    with gr.Tab('Mesh Options', id='tab_mesh_options'):
+                        gr.Markdown("**Floater Removal** - Remove disconnected mesh fragments (noise)")
+                        floater_ratio = gr.Slider(minimum=0.001, maximum=0.05, value=0.005, step=0.001,
+                                                 label='Floater Ratio',
+                                                 info='Remove components smaller than this fraction of total faces. Higher=more aggressive')
+                        gr.Markdown("**Face Reduction Settings** - Control mesh simplification quality")
+                        with gr.Row():
+                            quality_thr = gr.Slider(minimum=0.1, maximum=1.0, value=1.0, step=0.1,
+                                                   label='Quality Threshold',
+                                                   info='Higher=preserve quality, may not reach target. Lower=aggressive reduction')
+                            preserve_boundary = gr.Checkbox(value=True, label='Preserve Boundary',
+                                                           info='Keep mesh edges/silhouette intact')
+                        with gr.Row():
+                            boundary_weight = gr.Slider(minimum=1, maximum=10, value=3, step=1,
+                                                       label='Boundary Weight',
+                                                       info='How strongly to protect boundaries. Higher=more protection')
+                            preserve_normal = gr.Checkbox(value=True, label='Preserve Normals',
+                                                         info='Keep shading directions consistent')
+                        with gr.Row():
+                            preserve_topology = gr.Checkbox(value=True, label='Preserve Topology',
+                                                           info='Prevent holes/merging. Keep ON for 3D printing')
+                            auto_clean = gr.Checkbox(value=True, label='Auto Clean',
+                                                    info='Remove degenerate faces and duplicate vertices')
+                    with gr.Tab('Model Config', id='tab_model_config'):
+                        gr.Markdown(f"""
+## Current Model Configuration
+
+| Setting | Value |
+|---------|-------|
+| Shape Model | `{args.model_path}/{args.subfolder}` |
+| Texture Model | `{args.texgen_model_path}` |
+| Turbo Mode | {'**Enabled** (faster, uses FlashVDM)' if TURBO_MODE else 'Disabled'} |
+| Text-to-3D | {'**Enabled** (HunyuanDiT)' if HAS_T2I else 'Disabled'} |
+| Memory Profile | {args.profile} |
+
+---
+
+## Available Models
+
+| Flag | Model | Size | Description |
+|------|-------|------|-------------|
+| (default) | Hunyuan3D-2mini | 0.6B | Fast, good quality. Best for most uses. |
+| `--h2` | Hunyuan3D-2 | 1.1B | Full model. Higher quality, especially for complex shapes. |
+| `--mv` | Hunyuan3D-2mv | 1.1B | Multiview input. Use when you have multiple view images. |
+| `--turbo` | +Turbo | - | Add to any model for 5-step fast generation. Slight quality tradeoff. |
+
+## Memory Profiles
+
+| Profile | RAM | VRAM | Speed | Use When |
+|---------|-----|------|-------|----------|
+| 1 | High | High | Fastest | 32GB+ RAM, 12GB+ VRAM |
+| 2 | High | Low | Fast | 32GB+ RAM, 6-8GB VRAM |
+| 3 | Low | High | Medium | 16GB RAM, 12GB+ VRAM |
+| 4 | Low | Low | Slower | 16GB RAM, 6-8GB VRAM |
+| 5 | Very Low | Low | Slowest | 8GB RAM, 6GB VRAM |
+
+---
+
+## Restart Commands
+
+**Changing models requires a restart.** Example commands:
+
+```
+# Mini model (default, fast)
+python gradio_app.py --profile 3 --enable_t23d
+
+# Full model (higher quality)
+python gradio_app.py --h2 --profile 3 --enable_t23d
+
+# Turbo mode (5-step fast generation)
+python gradio_app.py --turbo --profile 3 --enable_t23d
+
+# Multiview input model
+python gradio_app.py --mv --profile 3
+```
+                        """)
                     with gr.Tab("Export", id='tab_export'):
                         with gr.Row():
                             file_type = gr.Dropdown(label='File Type', choices=SUPPORTED_FORMATS,
@@ -606,6 +832,15 @@ def build_app():
                 check_box_rembg,
                 num_chunks,
                 randomize_seed,
+                # Shape options
+                mc_level,
+                bounds,
+                eta,
+                min_resolution,
+                s_churn,
+                s_noise,
+                s_tmin,
+                s_tmax,
             ],
             outputs=[file_out, html_gen_mesh, stats, seed]
         ).then(
@@ -633,6 +868,33 @@ def build_app():
                 check_box_rembg,
                 num_chunks,
                 randomize_seed,
+                # Shape options
+                mc_level,
+                bounds,
+                eta,
+                min_resolution,
+                s_churn,
+                s_noise,
+                s_tmin,
+                s_tmax,
+                # Texture options
+                texture_size,
+                render_size,
+                bake_exp,
+                bake_angle_thres,
+                multiview_steps,
+                delight_steps,
+                delight_cfg_image,
+                delight_cfg_text,
+                use_antialias,
+                # Mesh options
+                floater_ratio,
+                quality_thr,
+                preserve_boundary,
+                boundary_weight,
+                preserve_normal,
+                preserve_topology,
+                auto_clean,
             ],
             outputs=[file_out, file_out2, html_gen_mesh, stats, seed]
         ).then(

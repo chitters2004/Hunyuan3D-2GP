@@ -34,26 +34,35 @@ def load_mesh(path):
     return mesh
 
 
-def reduce_face(mesh: pymeshlab.MeshSet, max_facenum: int = 200000):
+def reduce_face(
+    mesh: pymeshlab.MeshSet,
+    max_facenum: int = 200000,
+    qualitythr: float = 1.0,
+    preserveboundary: bool = True,
+    boundaryweight: int = 3,
+    preservenormal: bool = True,
+    preservetopology: bool = True,
+    autoclean: bool = True
+):
     if max_facenum > mesh.current_mesh().face_number():
         return mesh
 
     mesh.apply_filter(
         "meshing_decimation_quadric_edge_collapse",
         targetfacenum=max_facenum,
-        qualitythr=1.0,
-        preserveboundary=True,
-        boundaryweight=3,
-        preservenormal=True,
-        preservetopology=True,
-        autoclean=True
+        qualitythr=qualitythr,
+        preserveboundary=preserveboundary,
+        boundaryweight=boundaryweight,
+        preservenormal=preservenormal,
+        preservetopology=preservetopology,
+        autoclean=autoclean
     )
     return mesh
 
 
-def remove_floater(mesh: pymeshlab.MeshSet):
+def remove_floater(mesh: pymeshlab.MeshSet, nbfaceratio: float = 0.005):
     mesh.apply_filter("compute_selection_by_small_disconnected_components_per_face",
-                      nbfaceratio=0.005)
+                      nbfaceratio=nbfaceratio)
     mesh.apply_filter("compute_selection_transfer_face_to_vertex", inclusive=False)
     mesh.apply_filter("meshing_remove_selected_vertices_and_faces")
     return mesh
@@ -126,10 +135,25 @@ class FaceReducer:
     def __call__(
         self,
         mesh: Union[pymeshlab.MeshSet, trimesh.Trimesh, Latent2MeshOutput, str],
-        max_facenum: int = 40000
+        max_facenum: int = 40000,
+        qualitythr: float = 1.0,
+        preserveboundary: bool = True,
+        boundaryweight: int = 3,
+        preservenormal: bool = True,
+        preservetopology: bool = True,
+        autoclean: bool = True
     ) -> Union[pymeshlab.MeshSet, trimesh.Trimesh]:
         ms = import_mesh(mesh)
-        ms = reduce_face(ms, max_facenum=max_facenum)
+        ms = reduce_face(
+            ms,
+            max_facenum=max_facenum,
+            qualitythr=qualitythr,
+            preserveboundary=preserveboundary,
+            boundaryweight=boundaryweight,
+            preservenormal=preservenormal,
+            preservetopology=preservetopology,
+            autoclean=autoclean
+        )
         mesh = export_mesh(mesh, ms)
         return mesh
 
@@ -139,9 +163,10 @@ class FloaterRemover:
     def __call__(
         self,
         mesh: Union[pymeshlab.MeshSet, trimesh.Trimesh, Latent2MeshOutput, str],
+        nbfaceratio: float = 0.005
     ) -> Union[pymeshlab.MeshSet, trimesh.Trimesh, Latent2MeshOutput]:
         ms = import_mesh(mesh)
-        ms = remove_floater(ms)
+        ms = remove_floater(ms, nbfaceratio=nbfaceratio)
         mesh = export_mesh(mesh, ms)
         return mesh
 
